@@ -4,29 +4,39 @@ import Color (..)
 import Graphics.Collage (..)
 import Graphics.Element (..)
 import Graphics.Input
+import Graphics.Input (..)
 import Signal
+import Signal (..)
 import Dict
 import Dict (..)
+import Time (..)
 import List
+import List (..)
+import Text
+import Text (..)
 
 main : Signal Element
-main = lift view state
+main = Signal.map view state
   
 state : Signal State
 state = foldp step startState input
 
-input = sampleOn (fps 100) antTypeInput.signal
+type Action = TimeDelta Time | AntTypeChanged AntType
+
+input : Signal Action
+input = Signal.merge (TimeDelta <~ (fps 100))
+              ( AntTypeChanged <~ (Signal.subscribe antTypeInput))
 
 view : State -> Element
 view st = flow down 
             [collage 400 400 (Dict.foldr (\key val list -> (cell2form key val) :: list) [] st.visitedCells),
              flow right [ plainText " Type of ant:   ",
-                Graphics.Input.dropDown antTypeInput.handle antTypeOptions]]
+                dropDown (Signal.send antTypeInput) antTypeOptions]]
   
-antTypeInput : Graphics.Input.Input AntType
-antTypeInput = Graphics.Input.input (snd (head antTypeOptions))  
+antTypeInput : Signal.Channel AntType
+antTypeInput = Signal.channel (snd (head antTypeOptions))  
 
-antTypeOptions : [(String, AntType)]
+antTypeOptions : List (String, AntType)
 antTypeOptions = [("LR", [(0, L), (1, R)]), 
                   ("LLRR", [(0, L), (1, L), (2, R), (3, R)]),
                   ("LRLR", [(0, L), (1, R), (2, L), (3, R)]),
@@ -45,13 +55,13 @@ getColor i = case i of
 
 squareWidth = 4
 
-type Cell = (Int, Int)
+type alias Cell = (Int, Int)
 
-data Rotation = L | R
+type Rotation = L | R
 
-type AntType = [(Int, Rotation)]
+type alias AntType = List (Int, Rotation)
 
-type State = { cell: Cell, visitedCells : Dict Cell Int, direction :  (Int, Int), currentType : AntType}
+type alias State = { cell: Cell, visitedCells : Dict Cell Int, direction :  (Int, Int), currentType : AntType}
 
    
 startState : State
@@ -76,12 +86,14 @@ newDir t (x, y) b = let rot = snd (head (List.filter (\(s, r) -> s == b) t))
                     (0, -1) -> if rot == L then (1, 0) else (-1, 0)
                     (0, 1)  -> if rot == L then (-1, 0) else (1, 0)
 
-step : AntType -> State -> State
-step t st = if t == st.currentType then
-                let cellState = getCellState st.visitedCells st.cell
-                    newDirection = newDir t st.direction cellState
-                in {cell = ((fst st.cell) + (fst newDirection), (snd st.cell) + (snd newDirection)), 
-                    visitedCells = insert st.cell (updateCellState t cellState) st.visitedCells, 
-                    direction = newDirection,
-                    currentType = t}
-            else {cell = startState.cell, visitedCells = startState.visitedCells, direction = startState.direction, currentType = t}
+step : Action -> State -> State
+step t st = case t of 
+              AntTypeChanged t -> {cell = startState.cell, 
+                                   visitedCells = startState.visitedCells, 
+                                   direction = startState.direction, currentType = t}
+              TimeDelta d -> let cellState = getCellState st.visitedCells st.cell
+                                 newDirection = newDir st.currentType st.direction cellState
+                             in {cell = ((fst st.cell) + (fst newDirection), (snd st.cell) + (snd newDirection)), 
+                                 visitedCells = insert st.cell (updateCellState st.currentType cellState) st.visitedCells, 
+                                 direction = newDirection,
+                                 currentType = st.currentType}
